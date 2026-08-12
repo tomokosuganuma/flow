@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>学食ネットワークフロー・シミュレーター｜最大流と最小カット</title>
+<style>
+  :root{
+    --bg:#f3f4f2;
+    --panel:#ffffff;
+    --ink:#1c2320;
+    --sub:#5b655f;
+    --line:#d9ddd6;
+    --a-color:#d1477a;
+    --a-soft:#f6d9e5;
+    --b-color:#2f6fb0;
+    --b-soft:#d7e6f5;
+    --common:#7b877e;
+    --common-soft:#e4e7e2;
+    --cut:#c23b2c;
+    --cut-soft:#fbe1dc;
+    --sat:#c98a1c;
+    --sat-soft:#f7e6c2;
+    --accent:#1c6b53;
+    --mono: 'JetBrains Mono','SFMono-Regular',Consolas,monospace;
+    --sans: 'Zen Kaku Gothic New','Hiragino Sans','Yu Gothic',sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    line-height:1.65;
+    padding:20px;
+  }
+  .wrap{max-width:1280px;margin:0 auto;}
+
+  header.top{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:22px 26px;
+    margin-bottom:18px;
+  }
+  header.top h1{
+    margin:0 0 4px 0;
+    font-size:1.5rem;
+    letter-spacing:.02em;
+  }
+  header.top .sub{color:var(--sub);font-size:.88rem;margin-bottom:16px;}
+
+  .stat-row{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:14px;
+  }
+  .stat{
+    background:var(--common-soft);
+    border-radius:10px;
+    padding:14px 16px;
+    text-align:center;
+  }
+  .stat .label{font-size:.78rem;color:var(--sub);margin-bottom:6px;}
+  .stat .value{font-family:var(--mono);font-size:1.9rem;font-weight:700;}
+  .stat.demand .value{color:var(--ink);}
+  .stat.flow .value{color:var(--accent);}
+  .stat.unmet .value{color:var(--cut);}
+  .stat .unit{font-size:.85rem;font-weight:400;color:var(--sub);}
+
+  .note{
+    margin-top:14px;
+    font-size:.82rem;
+    color:var(--sub);
+    background:#fbf8ef;
+    border:1px dashed #e0d6b3;
+    border-radius:8px;
+    padding:10px 14px;
+  }
+
+  .grid{
+    display:grid;
+    grid-template-columns:1.55fr 1fr;
+    gap:18px;
+  }
+  @media (max-width:980px){
+    .grid{grid-template-columns:1fr;}
+    .stat-row{grid-template-columns:1fr;}
+  }
+
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:18px 20px;
+    margin-bottom:18px;
+  }
+  .panel h2{
+    font-size:1.02rem;
+    margin:0 0 12px 0;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .panel h2 .tag{
+    font-size:.68rem;
+    background:var(--accent);
+    color:#fff;
+    padding:2px 8px;
+    border-radius:20px;
+    font-weight:600;
+  }
+
+  /* --- diagram --- */
+  #diagram{width:100%;height:auto;display:block;}
+  .legend{
+    display:flex;
+    gap:16px;
+    flex-wrap:wrap;
+    font-size:.78rem;
+    color:var(--sub);
+    margin-top:6px;
+  }
+  .legend span{display:inline-flex;align-items:center;gap:6px;}
+  .swatch{width:14px;height:5px;border-radius:3px;display:inline-block;}
+
+  .edge-label-bg{fill:#ffffff;stroke:var(--line);stroke-width:1;}
+  .edge-label-text{font-family:var(--mono);font-size:12px;fill:var(--ink);}
+  .edge-name-text{font-family:var(--sans);font-size:10.5px;fill:var(--sub);}
+  .node-circle{stroke:#fff;stroke-width:2;}
+  .node-text{font-family:var(--sans);font-size:12px;fill:#fff;font-weight:700;text-anchor:middle;dominant-baseline:middle;}
+  .node-sub{font-family:var(--sans);font-size:9.5px;fill:var(--sub);text-anchor:middle;}
+
+  /* --- capacity panel --- */
+  .edge-row{
+    display:grid;
+    grid-template-columns:110px 1fr 56px;
+    align-items:center;
+    gap:10px;
+    padding:8px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .edge-row:last-child{border-bottom:none;}
+  .edge-row .name{font-family:var(--mono);font-size:.8rem;}
+  .edge-row input[type=range]{width:100%;accent-color:var(--accent);}
+  .edge-row input[type=number]{
+    width:56px;padding:4px;border:1px solid var(--line);border-radius:6px;
+    font-family:var(--mono);font-size:.85rem;text-align:center;
+  }
+  .edge-dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:6px;}
+
+  .btn-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;}
+  button{
+    font-family:var(--sans);
+    border:1px solid var(--line);
+    background:#fff;
+    padding:8px 14px;
+    border-radius:8px;
+    cursor:pointer;
+    font-size:.82rem;
+    transition:background .15s,border-color .15s;
+  }
+  button:hover{border-color:var(--accent);}
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
+  button.primary:hover{background:#155741;}
+  button.ghost{background:transparent;}
+
+  table.simple{width:100%;border-collapse:collapse;font-size:.85rem;}
+  table.simple th,table.simple td{
+    padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;
+  }
+  table.simple th{color:var(--sub);font-weight:600;font-size:.76rem;}
+  table.simple td.num{font-family:var(--mono);text-align:right;}
+
+  .cut-list li{font-family:var(--mono);font-size:.85rem;margin-bottom:4px;}
+  .badge{
+    display:inline-block;font-size:.68rem;padding:1px 7px;border-radius:20px;font-weight:700;
+  }
+  .badge.mincut{background:var(--cut-soft);color:var(--cut);}
+  .badge.sat{background:var(--sat-soft);color:var(--sat);}
+
+  .compare-box{
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    background:var(--common-soft);border-radius:10px;padding:14px;
+  }
+  .compare-col{text-align:center;min-width:110px;}
+  .compare-col .t{font-size:.75rem;color:var(--sub);}
+  .compare-col .v{font-family:var(--mono);font-weight:700;font-size:1.3rem;}
+  .arrow{font-size:1.4rem;color:var(--sub);}
+  .delta{font-family:var(--mono);font-weight:700;color:var(--accent);}
+  .delta.zero{color:var(--sub);}
+
+  .path-step{
+    font-family:var(--mono);
+    font-size:.85rem;
+    background:var(--common-soft);
+    border-radius:8px;
+    padding:8px 12px;
+    margin-bottom:6px;
+  }
+  .path-step .amt{color:var(--accent);font-weight:700;}
+  .path-step.reverse{background:var(--sat-soft);}
+
+  .edu dt{font-weight:700;margin-top:10px;color:var(--accent);}
+  .edu dd{margin:2px 0 0 0;color:var(--ink);font-size:.9rem;}
+
+  footer.credit{
+    text-align:center;color:var(--sub);font-size:.75rem;margin:26px 0 6px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>学食ネットワークフロー・シミュレーター</h1>
+    <div class="sub">食堂内の人の流れを容量付き有向グラフとしてモデル化し、最大流・最小カットをリアルタイムに計算します（グラフ理論レポート用）</div>
+
+    <div class="stat-row">
+      <div class="stat demand">
+        <div class="label">利用需要</div>
+        <div class="value">20 <span class="unit">人 / 15分</span></div>
+      </div>
+      <div class="stat flow">
+        <div class="label">最大流（現在の容量での計算結果）</div>
+        <div class="value" id="stat-maxflow">-- <span class="unit">人 / 15分</span></div>
+      </div>
+      <div class="stat unmet">
+        <div class="label">未処理需要（= 需要 − 最大流）</div>
+        <div class="value" id="stat-unmet">-- <span class="unit">人 / 15分</span></div>
+      </div>
+    </div>
+
+    <div class="note">
+      ※ 「未処理需要」は、この15分間のモデル上で処理しきれなかった人数の理論値です。実際の食堂では、そのまま列に並び続けて次の時間帯に処理されるか、あるいは一方のメニューの提供が終了した際にもう一方のメニューへ人が流れる、という2通りの状況として現れると考えられます。この静的な最大流モデルは、処理できなかった人数が「どの地点でどのくらい待つか」までは表現していません。
+    </div>
+  </header>
+
+  <div class="grid">
+    <!-- LEFT COLUMN -->
+    <div class="left">
+
+      <div class="panel">
+        <h2>ネットワーク図 <span class="tag">現在流量 / 容量</span></h2>
+        <svg id="diagram" viewBox="0 0 960 520" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div class="legend">
+          <span><i class="swatch" style="background:var(--a-color)"></i>Aメニュー系統</span>
+          <span><i class="swatch" style="background:var(--b-color)"></i>Bメニュー系統</span>
+          <span><i class="swatch" style="background:var(--common)"></i>共通経路</span>
+          <span><i class="swatch" style="background:var(--cut)"></i>最小カットを構成する辺</span>
+          <span><i class="swatch" style="background:var(--sat)"></i>飽和（ボトルネック候補）</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>改善シミュレーション（プリセット）</h2>
+        <div class="btn-row">
+          <button class="primary" data-preset="base">① 現状</button>
+          <button data-preset="p2">② 配膳後を改善</button>
+          <button data-preset="p3">③ 中流部も改善</button>
+          <button data-preset="p4">④ 全体改善</button>
+        </div>
+        <div class="compare-box">
+          <div class="compare-col">
+            <div class="t">改善前</div>
+            <div class="v" id="cmp-before-flow">--</div>
+            <div class="t">未処理 <span id="cmp-before-unmet">--</span></div>
+          </div>
+          <div class="arrow">→</div>
+          <div class="compare-col">
+            <div class="t">改善後（現在）</div>
+            <div class="v" id="cmp-after-flow">--</div>
+            <div class="t">未処理 <span id="cmp-after-unmet">--</span></div>
+          </div>
+          <div class="compare-col">
+            <div class="t">最大流の増加量</div>
+            <div class="v delta" id="cmp-delta">--</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>カット比較（代表的な3つのカット）</h2>
+        <table class="simple">
+          <tr><th>カットの位置</th><th>構成する辺</th><th class="num">容量の合計</th></tr>
+          <tr>
+            <td>入口付近</td><td style="font-family:var(--mono)">S → M</td>
+            <td class="num" id="cutcmp-entry">--</td>
+          </tr>
+          <tr>
+            <td>A・B系統中流部</td><td style="font-family:var(--mono)">W_A→Q_A, W_B→Q_B</td>
+            <td class="num" id="cutcmp-mid">--</td>
+          </tr>
+          <tr>
+            <td>終点T直前</td><td style="font-family:var(--mono)">P_A→T, P_B→T, W→T</td>
+            <td class="num" id="cutcmp-end">--</td>
+          </tr>
+        </table>
+        <div class="note" style="margin-top:10px;">
+          この3つは代表的なカットの比較であり、この比較だけで最小のものを最小カットと断定するのではない。最終的な最小カットは、最大流の計算とその後の残余グラフ探索によって確認する。
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>増加路の計算過程</h2>
+        <div class="btn-row">
+          <button id="toggle-paths" class="ghost">計算過程を見る / 隠す</button>
+        </div>
+        <div id="path-list" style="display:none;"></div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT COLUMN -->
+    <div class="right">
+
+      <div class="panel">
+        <h2>容量設定パネル</h2>
+        <div id="edge-controls"></div>
+      </div>
+
+      <div class="panel">
+        <h2>最小カット <span class="tag" id="mincut-tag">--</span></h2>
+        <div>最小カット容量：<strong id="mincut-cap" style="font-family:var(--mono)">--</strong> 人 / 15分</div>
+        <ul class="cut-list" id="mincut-list" style="margin-top:8px;padding-left:18px;"></ul>
+      </div>
+
+      <div class="panel">
+        <h2>各辺の流量と余裕容量</h2>
+        <table class="simple">
+          <thead>
+            <tr><th>辺</th><th class="num">流量</th><th class="num">容量</th><th class="num">余裕</th><th>状態</th></tr>
+          </thead>
+          <tbody id="slack-table"></tbody>
+        </table>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="panel edu">
+    <h2>用語解説（グラフ理論の基礎）</h2>
+    <dl>
+      <dt>頂点（ノード）</dt><dd>グラフを構成する点。ここでは食堂内の場所や状態（入口・手洗い場・配膳場所など）を表す。</dd>
+      <dt>有向辺</dt><dd>頂点と頂点を結ぶ、向きのある矢印。人がその方向にしか進めないことを表す。</dd>
+      <dt>容量</dt><dd>ある辺を同時に通過できる人数の上限。「人／15分」という単位で表している。</dd>
+      <dt>フロー（流量）</dt><dd>実際にその辺を通っている人数。どの辺でも必ず「流量 ≦ 容量」が成り立つ。</dd>
+      <dt>増加路</dt><dd>残余グラフ（まだ余裕のある辺だけを残したグラフ）上で、源点Sから終点Tまでたどれる経路。この経路を見つけては流量を増やす操作を繰り返して最大流を求める。</dd>
+      <dt>最大流</dt><dd>源点Sから終点Tへ、容量の制約を守りながら流せる合計人数の最大値。</dd>
+      <dt>カット</dt><dd>すべての頂点を、Sを含む集合Xと、Tを含む集合X̄の2グループに分けたとき、XからX̄へ向かう辺の容量の合計。</dd>
+      <dt>最小カット</dt><dd>考えられるすべてのカットの中で、容量の合計が最も小さいもの。</dd>
+      <dt>最大流最小カット定理</dt><dd>「最大流の値」と「最小カットの容量」は必ず一致するという定理。この定理により、最大流を計算すれば同時にボトルネックの構造（最小カット）も分かる。</dd>
+      <dt>ボトルネック</dt><dd>流れ全体を制限している、容量に対して余裕のない辺（飽和辺）。ただし飽和している辺が必ずしもすべて最小カットに含まれるわけではない点に注意。</dd>
+    </dl>
+  </div>
+
+  <footer class="credit">Ford-Fulkerson法（Edmonds-Karp法：BFSによる最短増加路探索）を用いて、容量変更のたびに最大流・最小カットを再計算しています。</footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ============ 1. グラフ定義 ============ */
+  // 各辺の定義：id, from, to, 初期容量, 系統(group: 'A' | 'B' | 'common')
+  const EDGE_DEFS = [
+    {id:'S_M',   from:'S',   to:'M',   cap:18, group:'common'},
+    {id:'M_WA',  from:'M',   to:'W_A', cap:10, group:'A'},
+    {id:'M_WB',  from:'M',   to:'W_B', cap:10, group:'B'},
+    {id:'WA_QA', from:'W_A', to:'Q_A', cap:8,  group:'A'},
+    {id:'WB_QB', from:'W_B', to:'Q_B', cap:8,  group:'B'},
+    {id:'QA_PA', from:'Q_A', to:'P_A', cap:8,  group:'A'},
+    {id:'QB_PB', from:'Q_B', to:'P_B', cap:8,  group:'B'},
+    {id:'PA_T',  from:'P_A', to:'T',   cap:5,  group:'A'},
+    {id:'PB_T',  from:'P_B', to:'T',   cap:5,  group:'B'},
+    {id:'PA_W',  from:'P_A', to:'W',   cap:3,  group:'A'},
+    {id:'PB_W',  from:'P_B', to:'W',   cap:3,  group:'B'},
+    {id:'W_T',   from:'W',   to:'T',   cap:4,  group:'common'},
+  ];
+
+  const NODE_LABELS = {
+    S:'S', M:'M', W_A:'W_A', W_B:'W_B', Q_A:'Q_A', Q_B:'Q_B',
+    P_A:'P_A', P_B:'P_B', W:'W', T:'T'
+  };
+  const NODE_SUBLABELS = {
+    S:'入口(源点)', M:'メニュー', W_A:'手洗いA', W_B:'手洗いB',
+    Q_A:'待機列A', Q_B:'待機列B', P_A:'配膳A', P_B:'配膳B',
+    W:'給水機', T:'テーブル(終点)'
+  };
+  // SVG 上の座標
+  const POS = {
+    S:  {x:50,  y:260},
+    M:  {x:180, y:260},
+    W_A:{x:330, y:95},
+    Q_A:{x:470, y:95},
+    P_A:{x:610, y:95},
+    W_B:{x:330, y:425},
+    Q_B:{x:470, y:425},
+    P_B:{x:610, y:425},
+    W:  {x:760, y:260},
+    T:  {x:900, y:260},
+  };
+
+  const DEMAND = 20; // 利用需要（人/15分）：固定値（A10人 + B10人）
+  const MAX_CAP_INPUT = 30; // スライダー上限（UI都合。物理的な意味の制約ではない）
+
+  const GROUP_COLOR = {
+    A:'var(--a-color)', B:'var(--b-color)', common:'var(--common)'
+  };
+
+  /* ============ 2. 現在の容量（状態） ============ */
+  let capacities = {};
+  EDGE_DEFS.forEach(e => capacities[e.id] = e.cap);
+
+  // 改善前後の比較用に、直前の計算結果を保持
+  let prevResult = null; // {maxFlow, unmet}
+  let currentResult = null;
+
+  /* ============ 3. Edmonds-Karp法（最大流計算） ============
+     残余グラフを edges 配列（順辺・逆辺のペア）として内部に構築し、
+     BFSで最短の増加路を繰り返し探索する。ハードコードは一切行わない。
+  */
+  function computeMaxFlow(caps){
+    // ノード一覧
+    const nodes = Object.keys(NODE_LABELS);
+    const adj = {}; nodes.forEach(n => adj[n] = []);
+
+    // edges: {from,to,capacity,flow,edgeDefId(順辺のみ),revIndex}
+    const edges = [];
+    EDGE_DEFS.forEach(def => {
+      const cap = Math.max(0, caps[def.id] || 0);
+      const fwdIndex = edges.length;
+      edges.push({from:def.from, to:def.to, capacity:cap, flow:0, edgeId:def.id});
+      const revIndex = edges.length;
+      edges.push({from:def.to, to:def.from, capacity:0, flow:0, edgeId:null});
+      edges[fwdIndex].rev = revIndex;
+      edges[revIndex].rev = fwdIndex;
+      adj[def.from].push(fwdIndex);
+      adj[def.to].push(revIndex);
+    });
+
+    const augmentingPaths = []; // 表示用ログ
+
+    function bfsFindPath(){
+      const parentEdge = {}; // node -> edgeIndex used to reach it
+      const visited = new Set(['S']);
+      const queue = ['S'];
+      while(queue.length){
+        const u = queue.shift();
+        if(u === 'T') break;
+        for(const idx of adj[u]){
+          const e = edges[idx];
+          const residual = e.capacity - e.flow;
+          if(residual > 0 && !visited.has(e.to)){
+            visited.add(e.to);
+            parentEdge[e.to] = idx;
+            queue.push(e.to);
+          }
+        }
+      }
+      if(!visited.has('T')) return null;
+      // 経路復元
+      const pathEdgeIdx = [];
+      let cur = 'T';
+      while(cur !== 'S'){
+        const idx = parentEdge[cur];
+        pathEdgeIdx.push(idx);
+        cur = edges[idx].from;
+      }
+      pathEdgeIdx.reverse();
+      return pathEdgeIdx;
+    }
+
+    let maxFlow = 0;
+    let guard = 0;
+    while(guard < 500){
+      guard++;
+      const path = bfsFindPath();
+      if(!path) break;
+      // 経路上の残余容量の最小値（ボトルネック）を求める
+      let bottleneck = Infinity;
+      path.forEach(idx => {
+        const e = edges[idx];
+        bottleneck = Math.min(bottleneck, e.capacity - e.flow);
+      });
+      // 流量を増加
+      path.forEach(idx => {
+        edges[idx].flow += bottleneck;
+        edges[edges[idx].rev].flow -= bottleneck;
+      });
+      maxFlow += bottleneck;
+
+      // 表示用に経路を記録（逆辺=取消操作の場合も明示する）
+      const nodeSeq = ['S'];
+      const stepInfo = [];
+      path.forEach(idx => {
+        const e = edges[idx];
+        nodeSeq.push(e.to);
+        stepInfo.push({from:e.from, to:e.to, isCancel: e.edgeId===null});
+      });
+      augmentingPaths.push({nodes:nodeSeq, steps:stepInfo, amount:bottleneck});
+    }
+
+    // 各元の辺（順辺）の実際の流量を取得
+    const flows = {};
+    EDGE_DEFS.forEach((def, i) => { flows[def.id] = edges[i*2].flow; });
+
+    // 最小カット：残余グラフ上でSから到達可能な頂点集合Xを求める
+    const reachable = new Set(['S']);
+    const q2 = ['S'];
+    while(q2.length){
+      const u = q2.shift();
+      for(const idx of adj[u]){
+        const e = edges[idx];
+        if(e.capacity - e.flow > 0 && !reachable.has(e.to)){
+          reachable.add(e.to);
+          q2.push(e.to);
+        }
+      }
+    }
+    const minCutEdges = [];
+    let minCutCapacity = 0;
+    EDGE_DEFS.forEach(def => {
+      const uIn = reachable.has(def.from);
+      const vIn = reachable.has(def.to);
+      if(uIn && !vIn){
+        minCutEdges.push(def.id);
+        minCutCapacity += Math.max(0, caps[def.id] || 0);
+      }
+    });
+
+    return {
+      maxFlow, flows, reachable, minCutEdges, minCutCapacity, augmentingPaths
+    };
+  }
+
+  /* ============ 4. SVGダイアグラム構築 ============ */
+  const svg = document.getElementById('diagram');
+
+  function buildStaticDiagram(){
+    svg.innerHTML = '';
+    const NS = 'http://www.w3.org/2000/svg';
+
+    // 矢印マーカー定義
+    const defs = document.createElementNS(NS,'defs');
+    ['a','b','common','cut'].forEach(key=>{
+      const marker = document.createElementNS(NS,'marker');
+      marker.setAttribute('id','arrow-'+key);
+      marker.setAttribute('viewBox','0 0 10 10');
+      marker.setAttribute('refX','9'); marker.setAttribute('refY','5');
+      marker.setAttribute('markerWidth','7'); marker.setAttribute('markerHeight','7');
+      marker.setAttribute('orient','auto-start-reverse');
+      const path = document.createElementNS(NS,'path');
+      path.setAttribute('d','M0,0 L10,5 L0,10 z');
+      const colorMap = {a:'var(--a-color)', b:'var(--b-color)', common:'var(--common)', cut:'var(--cut)'};
+      path.setAttribute('fill', colorMap[key]);
+      marker.appendChild(path);
+      defs.appendChild(marker);
+    });
+    svg.appendChild(defs);
+
+    // 辺（線 + ラベル）
+    EDGE_DEFS.forEach(def => {
+      const p1 = POS[def.from], p2 = POS[def.to];
+      const g = document.createElementNS(NS,'g');
+      g.setAttribute('id', 'edge-g-' + def.id);
+
+      const line = document.createElementNS(NS,'line');
+      line.setAttribute('id','edge-line-'+def.id);
+      line.setAttribute('x1',p1.x); line.setAttribute('y1',p1.y);
+      line.setAttribute('x2',p2.x); line.setAttribute('y2',p2.y);
+      line.setAttribute('stroke-linecap','round');
+      g.appendChild(line);
+
+      // ラベル背景＋テキスト（中点からやや外側にオフセット）
+      const mx = (p1.x+p2.x)/2, my = (p1.y+p2.y)/2;
+      const dx = p2.x-p1.x, dy = p2.y-p1.y;
+      const len = Math.sqrt(dx*dx+dy*dy) || 1;
+      const offX = -dy/len * 12, offY = dx/len * 12;
+      const lx = mx+offX, ly = my+offY;
+
+      const nameText = document.createElementNS(NS,'text');
+      nameText.setAttribute('class','edge-name-text');
+      nameText.setAttribute('x', lx); nameText.setAttribute('y', ly-9);
+      nameText.setAttribute('text-anchor','middle');
+      nameText.textContent = def.from + '→' + def.to;
+      g.appendChild(nameText);
+
+      const rect = document.createElementNS(NS,'rect');
+      rect.setAttribute('id','edge-rect-'+def.id);
+      rect.setAttribute('class','edge-label-bg');
+      rect.setAttribute('rx','4');
+      rect.setAttribute('width','54'); rect.setAttribute('height','18');
+      rect.setAttribute('x', lx-27); rect.setAttribute('y', ly-3);
+      g.appendChild(rect);
+
+      const label = document.createElementNS(NS,'text');
+      label.setAttribute('id','edge-label-'+def.id);
+      label.setAttribute('class','edge-label-text');
+      label.setAttribute('x', lx); label.setAttribute('y', ly+10);
+      label.setAttribute('text-anchor','middle');
+      label.textContent = '- / -';
+      g.appendChild(label);
+
+      svg.appendChild(g);
+    });
+
+    // 頂点（円 + ラベル）
+    Object.keys(POS).forEach(nid => {
+      const p = POS[nid];
+      const g = document.createElementNS(NS,'g');
+
+      const circle = document.createElementNS(NS,'circle');
+      circle.setAttribute('id','node-circle-'+nid);
+      circle.setAttribute('class','node-circle');
+      circle.setAttribute('cx',p.x); circle.setAttribute('cy',p.y); circle.setAttribute('r',26);
+      let fill = 'var(--common)';
+      if(nid==='S' || nid==='T') fill = 'var(--accent)';
+      else if(['M','W'].includes(nid)) fill = 'var(--common)';
+      else if(['W_A','Q_A','P_A'].includes(nid)) fill = 'var(--a-color)';
+      else if(['W_B','Q_B','P_B'].includes(nid)) fill = 'var(--b-color)';
+      circle.setAttribute('fill', fill);
+      g.appendChild(circle);
+
+      const text = document.createElementNS(NS,'text');
+      text.setAttribute('class','node-text');
+      text.setAttribute('x',p.x); text.setAttribute('y',p.y);
+      text.textContent = NODE_LABELS[nid];
+      g.appendChild(text);
+
+      const sub = document.createElementNS(NS,'text');
+      sub.setAttribute('class','node-sub');
+      sub.setAttribute('x',p.x); sub.setAttribute('y',p.y+40);
+      sub.textContent = NODE_SUBLABELS[nid];
+      g.appendChild(sub);
+
+      svg.appendChild(g);
+    });
+  }
+
+  function updateDiagram(result){
+    EDGE_DEFS.forEach(def => {
+      const cap = capacities[def.id];
+      const flow = result.flows[def.id];
+      const line = document.getElementById('edge-line-'+def.id);
+      const label = document.getElementById('edge-label-'+def.id);
+      const rect = document.getElementById('edge-rect-'+def.id);
+
+      label.textContent = flow + ' / ' + cap;
+
+      const isMinCut = result.minCutEdges.includes(def.id);
+      const isSaturated = cap > 0 && flow >= cap;
+
+      let strokeColor = GROUP_COLOR[def.group];
+      let strokeWidth = 3;
+      let markerKey = def.group === 'A' ? 'a' : (def.group === 'B' ? 'b' : 'common');
+      let dash = 'none';
+
+      if(isSaturated){
+        strokeWidth = 4.5;
+        rect.setAttribute('stroke', 'var(--sat)');
+        rect.setAttribute('stroke-width','1.6');
+      } else {
+        rect.setAttribute('stroke','var(--line)');
+        rect.setAttribute('stroke-width','1');
+      }
+
+      if(isMinCut){
+        strokeColor = 'var(--cut)';
+        strokeWidth = 5.5;
+        markerKey = 'cut';
+      }
+
+      line.setAttribute('stroke', strokeColor);
+      line.setAttribute('stroke-width', strokeWidth);
+      line.setAttribute('stroke-dasharray', dash);
+      line.setAttribute('marker-end', 'url(#arrow-'+markerKey+')');
+    });
+  }
+
+  /* ============ 5. 容量設定パネル ============ */
+  const controlsWrap = document.getElementById('edge-controls');
+  function buildControls(){
+    controlsWrap.innerHTML = '';
+    EDGE_DEFS.forEach(def => {
+      const row = document.createElement('div');
+      row.className = 'edge-row';
+
+      const nameDiv = document.createElement('div');
+      nameDiv.className = 'name';
+      const dot = document.createElement('span');
+      dot.className = 'edge-dot';
+      dot.style.background = GROUP_COLOR[def.group];
+      nameDiv.appendChild(dot);
+      nameDiv.appendChild(document.createTextNode(def.from + '→' + def.to));
+      row.appendChild(nameDiv);
+
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = 0; slider.max = MAX_CAP_INPUT; slider.step = 1;
+      slider.value = capacities[def.id];
+      slider.id = 'slider-'+def.id;
+
+      const numInput = document.createElement('input');
+      numInput.type = 'number';
+      numInput.min = 0; numInput.max = MAX_CAP_INPUT; numInput.step = 1;
+      numInput.value = capacities[def.id];
+      numInput.id = 'num-'+def.id;
+
+      function onChange(val){
+        let v = parseInt(val, 10);
+        if(isNaN(v) || v < 0) v = 0; // 不正入力（NaN・負値）を防止
+        if(v > MAX_CAP_INPUT) v = MAX_CAP_INPUT;
+        capacities[def.id] = v;
+        slider.value = v;
+        numInput.value = v;
+        recalcAndRender();
+      }
+      slider.addEventListener('input', () => onChange(slider.value));
+      numInput.addEventListener('input', () => onChange(numInput.value));
+
+      row.appendChild(slider);
+      row.appendChild(numInput);
+      controlsWrap.appendChild(row);
+    });
+  }
+
+  /* ============ 6. 各種パネルの更新 ============ */
+  function updateTopStats(result){
+    document.getElementById('stat-maxflow').innerHTML = result.maxFlow + ' <span class="unit">人 / 15分</span>';
+    const unmet = Math.max(0, DEMAND - result.maxFlow);
+    document.getElementById('stat-unmet').innerHTML = unmet + ' <span class="unit">人 / 15分</span>';
+  }
+
+  function updateMinCutPanel(result){
+    document.getElementById('mincut-tag').textContent = 'X̄ = {T 側 ' + (10 - result.reachable.size) + '個}';
+    document.getElementById('mincut-cap').textContent = result.minCutCapacity;
+    const list = document.getElementById('mincut-list');
+    list.innerHTML = '';
+    result.minCutEdges.forEach(id => {
+      const def = EDGE_DEFS.find(d => d.id === id);
+      const li = document.createElement('li');
+      li.textContent = def.from + ' → ' + def.to + '：' + capacities[id];
+      list.appendChild(li);
+    });
+    if(result.minCutEdges.length === 0){
+      const li = document.createElement('li');
+      li.textContent = '（辺なし）';
+      list.appendChild(li);
+    }
+  }
+
+  function updateSlackTable(result){
+    const tbody = document.getElementById('slack-table');
+    tbody.innerHTML = '';
+    EDGE_DEFS.forEach(def => {
+      const cap = capacities[def.id];
+      const flow = result.flows[def.id];
+      const slack = cap - flow;
+      const isMinCut = result.minCutEdges.includes(def.id);
+      const isSaturated = cap > 0 && flow >= cap;
+
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td style="font-family:var(--mono)">' + def.from + '→' + def.to + '</td>' +
+        '<td class="num">' + flow + '</td>' +
+        '<td class="num">' + cap + '</td>' +
+        '<td class="num">' + slack + '</td>' +
+        '<td>' +
+          (isMinCut ? '<span class="badge mincut">最小カット</span> ' : '') +
+          (isSaturated ? '<span class="badge sat">飽和</span>' : '') +
+        '</td>';
+      tbody.appendChild(tr);
+    });
+  }
+
+  function updateCutComparison(){
+    const entry = capacities.S_M;
+    const mid = capacities.WA_QA + capacities.WB_QB;
+    const end = capacities.PA_T + capacities.PB_T + capacities.W_T;
+    document.getElementById('cutcmp-entry').textContent = entry;
+    document.getElementById('cutcmp-mid').textContent = mid;
+    document.getElementById('cutcmp-end').textContent = end;
+  }
+
+  function updateCompareBox(){
+    if(!prevResult){
+      document.getElementById('cmp-before-flow').textContent = '--';
+      document.getElementById('cmp-before-unmet').textContent = '--';
+    } else {
+      document.getElementById('cmp-before-flow').textContent = prevResult.maxFlow;
+      document.getElementById('cmp-before-unmet').textContent = Math.max(0, DEMAND - prevResult.maxFlow);
+    }
+    document.getElementById('cmp-after-flow').textContent = currentResult.maxFlow;
+    document.getElementById('cmp-after-unmet').textContent = Math.max(0, DEMAND - currentResult.maxFlow);
+
+    const deltaEl = document.getElementById('cmp-delta');
+    if(!prevResult){
+      deltaEl.textContent = '--';
+      deltaEl.className = 'v delta zero';
+    } else {
+      const d = currentResult.maxFlow - prevResult.maxFlow;
+      deltaEl.textContent = (d > 0 ? '+' : '') + d;
+      deltaEl.className = 'v delta' + (d===0 ? ' zero' : '');
+    }
+  }
+
+  function updatePathList(result){
+    const wrap = document.getElementById('path-list');
+    wrap.innerHTML = '';
+    result.augmentingPaths.forEach((p, i) => {
+      const div = document.createElement('div');
+      const hasCancel = p.steps.some(s => s.isCancel);
+      div.className = 'path-step' + (hasCancel ? ' reverse' : '');
+      const pathStr = p.nodes.join(' → ');
+      div.innerHTML = '増加路 ' + (i+1) + '： ' + pathStr +
+        '　<span class="amt">追加流量 +' + p.amount + '</span>' +
+        (hasCancel ? '　<em>(逆辺を含む＝一部の流れを付け替え)</em>' : '');
+      wrap.appendChild(div);
+    });
+    if(result.augmentingPaths.length === 0){
+      wrap.innerHTML = '<div class="path-step">増加路が見つかりませんでした（S→Tが遮断されています）。</div>';
+    }
+  }
+
+  /* ============ 7. 全体の再計算と再描画 ============ */
+  function recalcAndRender(keepPrev){
+    if(!keepPrev){
+      prevResult = currentResult;
+    }
+    const result = computeMaxFlow(capacities);
+    currentResult = { maxFlow: result.maxFlow };
+
+    updateTopStats(result);
+    updateDiagram(result);
+    updateMinCutPanel(result);
+    updateSlackTable(result);
+    updateCutComparison();
+    updateCompareBox();
+    updatePathList(result);
+  }
+
+  /* ============ 8. プリセット ============ */
+  const PRESETS = {
+    base: {S_M:18, M_WA:10, M_WB:10, WA_QA:8, WB_QB:8, QA_PA:8, QB_PB:8, PA_T:5, PB_T:5, PA_W:3, PB_W:3, W_T:4},
+    p2:   {S_M:18, M_WA:10, M_WB:10, WA_QA:8, WB_QB:8, QA_PA:8, QB_PB:8, PA_T:8, PB_T:8, PA_W:3, PB_W:3, W_T:4},
+    p3:   {S_M:18, M_WA:10, M_WB:10, WA_QA:10, WB_QB:10, QA_PA:10, QB_PB:10, PA_T:10, PB_T:10, PA_W:3, PB_W:3, W_T:4},
+    p4:   {S_M:20, M_WA:10, M_WB:10, WA_QA:10, WB_QB:10, QA_PA:10, QB_PB:10, PA_T:10, PB_T:10, PA_W:3, PB_W:3, W_T:4},
+  };
+
+  function applyPreset(key){
+    const preset = PRESETS[key];
+    capacities = Object.assign({}, preset);
+    EDGE_DEFS.forEach(def => {
+      document.getElementById('slider-'+def.id).value = capacities[def.id];
+      document.getElementById('num-'+def.id).value = capacities[def.id];
+    });
+    recalcAndRender();
+    document.querySelectorAll('[data-preset]').forEach(b=>b.classList.remove('primary'));
+    document.querySelector('[data-preset="'+key+'"]').classList.add('primary');
+  }
+
+  document.querySelectorAll('[data-preset]').forEach(btn => {
+    btn.addEventListener('click', () => applyPreset(btn.getAttribute('data-preset')));
+  });
+
+  document.getElementById('toggle-paths').addEventListener('click', () => {
+    const el = document.getElementById('path-list');
+    el.style.display = (el.style.display === 'none') ? 'block' : 'none';
+  });
+
+  /* ============ 9. 初期化 & 自己テスト ============ */
+  function init(){
+    buildStaticDiagram();
+    buildControls();
+    recalcAndRender(true); // 初回は「改善前」比較を表示しない
+
+    // ---- 自己テスト（コンソール出力。仕様書の検証項目に対応） ----
+    const test = computeMaxFlow(PRESETS.base);
+    console.assert(test.maxFlow === 14, '[TEST1] 初期状態の最大流が14であること: ' + test.maxFlow);
+    console.assert(test.minCutCapacity === 14, '[TEST2] 最小カット容量が14であること: ' + test.minCutCapacity);
+    const expectedCut = ['PA_T','PB_T','W_T'];
+    const cutOk = expectedCut.every(id => test.minCutEdges.includes(id)) && test.minCutEdges.length === expectedCut.length;
+    console.assert(cutOk, '[TEST3] 最小カットがP_A→T, P_B→T, W→Tであること: ' + test.minCutEdges.join(','));
+    console.assert(test.maxFlow <= DEMAND, '[TEST6] 最大流が利用需要20を超えないこと');
+    console.log('自己テスト完了：最大流=' + test.maxFlow + '（期待値14） / 最小カット容量=' + test.minCutCapacity + '（期待値14）');
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
