@@ -233,6 +233,7 @@
 
     <div class="note">
       ※ 「未処理需要」は、この15分間のモデル上で処理しきれなかった人数の理論値です。実際の食堂では、そのまま列に並び続けて次の時間帯に処理されるか、あるいは一方のメニューの提供が終了した際にもう一方のメニューへ人が流れる、という2通りの状況として現れると考えられます。この静的な最大流モデルは、処理できなかった人数が「どの地点でどのくらい待つか」までは表現していません。
+      <br>※ 食堂の利用者数はそもそも20人しかいないため、内部のどの辺の容量をどれだけ増やしても、計算される最大流が20を超えることはありません（源点Sの手前に「利用需要20」を容量とする仮想の制約を設け、グラフ理論的に需要そのものを容量として扱っています）。
     </div>
   </header>
 
@@ -259,6 +260,9 @@
           <button data-preset="p2">② 配膳後を改善</button>
           <button data-preset="p3">③ 中流部も改善</button>
           <button data-preset="p4">④ 全体改善</button>
+        </div>
+        <div class="note" style="margin-bottom:14px;">
+          ※「②配膳後を改善」以降は、容量を変えるだけでなく<strong>グラフ構造そのもの</strong>を変更しています。P_A→T・P_B→Tという辺を廃止し、新しい合流頂点<strong>C</strong>を追加してP_A→C・P_B→C・C→Tという構造に置き換えることで、レポートの改善モデルと対応させています。
         </div>
         <div class="compare-box">
           <div class="compare-col">
@@ -292,7 +296,7 @@
             <td class="num" id="cutcmp-mid">--</td>
           </tr>
           <tr>
-            <td>終点T直前</td><td style="font-family:var(--mono)">P_A→T, P_B→T, W→T</td>
+            <td>終点T直前</td><td style="font-family:var(--mono)" id="cutcmp-end-label">P_A→T, P_B→T, W→T</td>
             <td class="num" id="cutcmp-end">--</td>
           </tr>
         </table>
@@ -362,8 +366,14 @@
   "use strict";
 
   /* ============ 1. グラフ定義 ============ */
-  // 各辺の定義：id, from, to, 初期容量, 系統(group: 'A' | 'B' | 'common')
-  const EDGE_DEFS = [
+  // 2種類のグラフ構造を用意する。
+  //  - "normal"：レポートの基本構造（P_A→T, P_B→T, W→T）
+  //  - "withC" ：改善①でP_A・P_Bの先に新しい合流頂点Cを追加した構造
+  //              （P_A→T, P_B→T という辺そのものを削除し、P_A→C, P_B→C, C→T に置き換える）
+  // 容量の数値だけを変えるのではなく、辺集合そのものを切り替えることで、
+  // レポートの「Cを追加する改善」を構造レベルで再現する。
+
+  const EDGE_DEFS_NORMAL = [
     {id:'S_M',   from:'S',   to:'M',   cap:18, group:'common'},
     {id:'M_WA',  from:'M',   to:'W_A', cap:10, group:'A'},
     {id:'M_WB',  from:'M',   to:'W_B', cap:10, group:'B'},
@@ -378,17 +388,38 @@
     {id:'W_T',   from:'W',   to:'T',   cap:4,  group:'common'},
   ];
 
-  const NODE_LABELS = {
+  // withC：P_A→T, P_B→T を取り除き、代わりに P_A→C, P_B→C, C→T を追加した構造
+  const EDGE_DEFS_WITH_C = [
+    {id:'S_M',   from:'S',   to:'M',   cap:18, group:'common'},
+    {id:'M_WA',  from:'M',   to:'W_A', cap:10, group:'A'},
+    {id:'M_WB',  from:'M',   to:'W_B', cap:10, group:'B'},
+    {id:'WA_QA', from:'W_A', to:'Q_A', cap:8,  group:'A'},
+    {id:'WB_QB', from:'W_B', to:'Q_B', cap:8,  group:'B'},
+    {id:'QA_PA', from:'Q_A', to:'P_A', cap:8,  group:'A'},
+    {id:'QB_PB', from:'Q_B', to:'P_B', cap:8,  group:'B'},
+    {id:'PA_C',  from:'P_A', to:'C',   cap:8,  group:'A'},
+    {id:'PB_C',  from:'P_B', to:'C',   cap:8,  group:'B'},
+    {id:'PA_W',  from:'P_A', to:'W',   cap:3,  group:'A'},
+    {id:'PB_W',  from:'P_B', to:'W',   cap:3,  group:'B'},
+    {id:'W_T',   from:'W',   to:'T',   cap:4,  group:'common'},
+    {id:'C_T',   from:'C',   to:'T',   cap:16, group:'common'},
+  ];
+
+  const NODE_LABELS_NORMAL = {
     S:'S', M:'M', W_A:'W_A', W_B:'W_B', Q_A:'Q_A', Q_B:'Q_B',
     P_A:'P_A', P_B:'P_B', W:'W', T:'T'
   };
-  const NODE_SUBLABELS = {
+  const NODE_LABELS_WITH_C = Object.assign({}, NODE_LABELS_NORMAL, {C:'C'});
+
+  const NODE_SUBLABELS_NORMAL = {
     S:'入口(源点)', M:'メニュー', W_A:'手洗いA', W_B:'手洗いB',
     Q_A:'待機列A', Q_B:'待機列B', P_A:'配膳A', P_B:'配膳B',
     W:'給水機', T:'テーブル(終点)'
   };
-  // SVG 上の座標
-  const POS = {
+  const NODE_SUBLABELS_WITH_C = Object.assign({}, NODE_SUBLABELS_NORMAL, {C:'合流地点'});
+
+  // SVG 上の座標（構造ごとに用意。Cありのときは P_A/P_B の右にCを挟み、Tをさらに右へ動かす）
+  const POS_NORMAL = {
     S:  {x:50,  y:260},
     M:  {x:180, y:260},
     W_A:{x:330, y:95},
@@ -400,6 +431,19 @@
     W:  {x:760, y:260},
     T:  {x:900, y:260},
   };
+  const POS_WITH_C = {
+    S:  {x:50,  y:260},
+    M:  {x:170, y:260},
+    W_A:{x:300, y:95},
+    Q_A:{x:420, y:95},
+    P_A:{x:540, y:95},
+    W_B:{x:300, y:425},
+    Q_B:{x:420, y:425},
+    P_B:{x:540, y:425},
+    W:  {x:660, y:340},
+    C:  {x:730, y:200},
+    T:  {x:900, y:260},
+  };
 
   const DEMAND = 20; // 利用需要（人/15分）：固定値（A10人 + B10人）
   const MAX_CAP_INPUT = 30; // スライダー上限（UI都合。物理的な意味の制約ではない）
@@ -407,6 +451,12 @@
   const GROUP_COLOR = {
     A:'var(--a-color)', B:'var(--b-color)', common:'var(--common)'
   };
+
+  // ---- 現在アクティブなグラフ構造（プリセットに応じて切り替える） ----
+  let EDGE_DEFS = EDGE_DEFS_NORMAL;
+  let NODE_LABELS = NODE_LABELS_NORMAL;
+  let NODE_SUBLABELS = NODE_SUBLABELS_NORMAL;
+  let POS = POS_NORMAL;
 
   /* ============ 2. 現在の容量（状態） ============ */
   let capacities = {};
@@ -419,14 +469,29 @@
   /* ============ 3. Edmonds-Karp法（最大流計算） ============
      残余グラフを edges 配列（順辺・逆辺のペア）として内部に構築し、
      BFSで最短の増加路を繰り返し探索する。ハードコードは一切行わない。
+
+     【利用需要20人の上限について】
+     単純にS→Mなど各辺の容量を大きくしていくと、グラフ構造だけで決まる
+     最大流はいくらでも大きくなり得てしまい、「学食の利用者は20人しかいない」
+     という前提と矛盾する。そこで、実在しない仮想の超始点 S0 を用意し、
+     S0→S の辺に「容量20（＝利用需要）」を持たせたうえでS0を本当の始点として
+     最大流を計算する。こうすることで、S→M以降の容量をいくら増やしても、
+     アルゴリズム自身がS0→Sの容量20を天井として認識し、
+     計算結果としての最大流が20を超えることは構造的に起こり得なくなる。
+     （後から min(結果, 20) と数値を切り詰めているのではなく、
+       グラフ理論的に「需要も容量である」とモデル化している点がポイント）
   */
   function computeMaxFlow(caps){
-    // ノード一覧
-    const nodes = Object.keys(NODE_LABELS);
+    const SUPER_SOURCE = 'S0';
+
+    // ノード一覧（現在アクティブな構造＋仮想超始点）
+    const nodes = Object.keys(NODE_LABELS).concat([SUPER_SOURCE]);
     const adj = {}; nodes.forEach(n => adj[n] = []);
 
     // edges: {from,to,capacity,flow,edgeDefId(順辺のみ),revIndex}
     const edges = [];
+
+    // 各元の辺（順辺・逆辺のペア）を登録
     EDGE_DEFS.forEach(def => {
       const cap = Math.max(0, caps[def.id] || 0);
       const fwdIndex = edges.length;
@@ -439,12 +504,22 @@
       adj[def.to].push(revIndex);
     });
 
+    // 仮想辺 S0→S（容量＝利用需要20）を追加。これが唯一の需要制約。
+    const demandFwd = edges.length;
+    edges.push({from:SUPER_SOURCE, to:'S', capacity:DEMAND, flow:0, edgeId:null});
+    const demandRev = edges.length;
+    edges.push({from:'S', to:SUPER_SOURCE, capacity:0, flow:0, edgeId:null});
+    edges[demandFwd].rev = demandRev;
+    edges[demandRev].rev = demandFwd;
+    adj[SUPER_SOURCE].push(demandFwd);
+    adj['S'].push(demandRev);
+
     const augmentingPaths = []; // 表示用ログ
 
     function bfsFindPath(){
       const parentEdge = {}; // node -> edgeIndex used to reach it
-      const visited = new Set(['S']);
-      const queue = ['S'];
+      const visited = new Set([SUPER_SOURCE]);
+      const queue = [SUPER_SOURCE];
       while(queue.length){
         const u = queue.shift();
         if(u === 'T') break;
@@ -459,10 +534,11 @@
         }
       }
       if(!visited.has('T')) return null;
-      // 経路復元
+      // 経路復元（仮想始点S0から辿るが、S0→Sの部分は「需要の天井」であって
+      // 食堂内の実在する辺ではないため、表示用には後で取り除く）
       const pathEdgeIdx = [];
       let cur = 'T';
-      while(cur !== 'S'){
+      while(cur !== SUPER_SOURCE){
         const idx = parentEdge[cur];
         pathEdgeIdx.push(idx);
         cur = edges[idx].from;
@@ -733,7 +809,8 @@
   }
 
   function updateMinCutPanel(result){
-    document.getElementById('mincut-tag').textContent = 'X̄ = {T 側 ' + (10 - result.reachable.size) + '個}';
+    const totalNodes = Object.keys(NODE_LABELS).length;
+    document.getElementById('mincut-tag').textContent = 'X̄ = {T 側 ' + (totalNodes - result.reachable.size) + '個}';
     document.getElementById('mincut-cap').textContent = result.minCutCapacity;
     const list = document.getElementById('mincut-list');
     list.innerHTML = '';
@@ -777,10 +854,21 @@
   function updateCutComparison(){
     const entry = capacities.S_M;
     const mid = capacities.WA_QA + capacities.WB_QB;
-    const end = capacities.PA_T + capacities.PB_T + capacities.W_T;
+    // 終点T直前のカットは構造によって構成する辺が変わる
+    //  - normal構造：P_A→T, P_B→T, W→T
+    //  - withC構造 ：C→T, W→T（P_A→C・P_B→Cは中流部の一部でありT直前のカットではない）
+    let end, endLabel;
+    if(currentStructure === 'withC'){
+      end = capacities.C_T + capacities.W_T;
+      endLabel = 'C→T, W→T';
+    } else {
+      end = capacities.PA_T + capacities.PB_T + capacities.W_T;
+      endLabel = 'P_A→T, P_B→T, W→T';
+    }
     document.getElementById('cutcmp-entry').textContent = entry;
     document.getElementById('cutcmp-mid').textContent = mid;
     document.getElementById('cutcmp-end').textContent = end;
+    document.getElementById('cutcmp-end-label').textContent = endLabel;
   }
 
   function updateCompareBox(){
@@ -840,21 +928,65 @@
     updatePathList(result);
   }
 
-  /* ============ 8. プリセット ============ */
+  /* ============ 8. プリセット ============
+     各プリセットは「どのグラフ構造を使うか（structure）」と「容量の値」を
+     セットで持つ。②配膳後を改善は、レポートに合わせて頂点Cを追加した
+     "withC" 構造そのものに切り替える（容量の数値変更だけで済ませない）。
+  */
   const PRESETS = {
-    base: {S_M:18, M_WA:10, M_WB:10, WA_QA:8, WB_QB:8, QA_PA:8, QB_PB:8, PA_T:5, PB_T:5, PA_W:3, PB_W:3, W_T:4},
-    p2:   {S_M:18, M_WA:10, M_WB:10, WA_QA:8, WB_QB:8, QA_PA:8, QB_PB:8, PA_T:8, PB_T:8, PA_W:3, PB_W:3, W_T:4},
-    p3:   {S_M:18, M_WA:10, M_WB:10, WA_QA:10, WB_QB:10, QA_PA:10, QB_PB:10, PA_T:10, PB_T:10, PA_W:3, PB_W:3, W_T:4},
-    p4:   {S_M:20, M_WA:10, M_WB:10, WA_QA:10, WB_QB:10, QA_PA:10, QB_PB:10, PA_T:10, PB_T:10, PA_W:3, PB_W:3, W_T:4},
+    base: {
+      structure:'normal',
+      caps:{S_M:18, M_WA:10, M_WB:10, WA_QA:8, WB_QB:8, QA_PA:8, QB_PB:8, PA_T:5, PB_T:5, PA_W:3, PB_W:3, W_T:4}
+    },
+    p2: {
+      // 改善①：P_A→T, P_B→T を廃止し、新頂点Cで合流させてからTへ
+      // C→Tの容量を16にすることで、次のボトルネックが中流部(16)に来るよう設計。
+      structure:'withC',
+      caps:{S_M:18, M_WA:10, M_WB:10, WA_QA:8, WB_QB:8, QA_PA:8, QB_PB:8, PA_C:8, PB_C:8, PA_W:3, PB_W:3, W_T:4, C_T:16}
+    },
+    p3: {
+      structure:'withC',
+      caps:{S_M:18, M_WA:10, M_WB:10, WA_QA:10, WB_QB:10, QA_PA:10, QB_PB:10, PA_C:10, PB_C:10, PA_W:3, PB_W:3, W_T:4, C_T:20}
+    },
+    p4: {
+      structure:'withC',
+      caps:{S_M:20, M_WA:10, M_WB:10, WA_QA:10, WB_QB:10, QA_PA:10, QB_PB:10, PA_C:10, PB_C:10, PA_W:3, PB_W:3, W_T:4, C_T:20}
+    },
   };
+
+  function switchStructure(structureKey){
+    if(structureKey === 'withC'){
+      EDGE_DEFS = EDGE_DEFS_WITH_C;
+      NODE_LABELS = NODE_LABELS_WITH_C;
+      NODE_SUBLABELS = NODE_SUBLABELS_WITH_C;
+      POS = POS_WITH_C;
+    } else {
+      EDGE_DEFS = EDGE_DEFS_NORMAL;
+      NODE_LABELS = NODE_LABELS_NORMAL;
+      NODE_SUBLABELS = NODE_SUBLABELS_NORMAL;
+      POS = POS_NORMAL;
+    }
+  }
+
+  let currentStructure = 'normal';
 
   function applyPreset(key){
     const preset = PRESETS[key];
-    capacities = Object.assign({}, preset);
-    EDGE_DEFS.forEach(def => {
-      document.getElementById('slider-'+def.id).value = capacities[def.id];
-      document.getElementById('num-'+def.id).value = capacities[def.id];
-    });
+    const structureChanged = (preset.structure !== currentStructure);
+    currentStructure = preset.structure;
+    switchStructure(preset.structure);
+    capacities = Object.assign({}, preset.caps);
+
+    if(structureChanged){
+      // 構造そのものが変わった場合は、図と容量パネルを丸ごと作り直す
+      buildStaticDiagram();
+      buildControls();
+    } else {
+      EDGE_DEFS.forEach(def => {
+        document.getElementById('slider-'+def.id).value = capacities[def.id];
+        document.getElementById('num-'+def.id).value = capacities[def.id];
+      });
+    }
     recalcAndRender();
     document.querySelectorAll('[data-preset]').forEach(b=>b.classList.remove('primary'));
     document.querySelector('[data-preset="'+key+'"]').classList.add('primary');
@@ -871,12 +1003,15 @@
 
   /* ============ 9. 初期化 & 自己テスト ============ */
   function init(){
+    switchStructure('normal');
+    capacities = Object.assign({}, PRESETS.base.caps);
     buildStaticDiagram();
     buildControls();
     recalcAndRender(true); // 初回は「改善前」比較を表示しない
 
     // ---- 自己テスト（コンソール出力。仕様書の検証項目に対応） ----
-    const test = computeMaxFlow(PRESETS.base);
+    switchStructure('normal');
+    const test = computeMaxFlow(PRESETS.base.caps);
     console.assert(test.maxFlow === 14, '[TEST1] 初期状態の最大流が14であること: ' + test.maxFlow);
     console.assert(test.minCutCapacity === 14, '[TEST2] 最小カット容量が14であること: ' + test.minCutCapacity);
     const expectedCut = ['PA_T','PB_T','W_T'];
@@ -884,6 +1019,16 @@
     console.assert(cutOk, '[TEST3] 最小カットがP_A→T, P_B→T, W→Tであること: ' + test.minCutEdges.join(','));
     console.assert(test.maxFlow <= DEMAND, '[TEST6] 最大流が利用需要20を超えないこと');
     console.log('自己テスト完了：最大流=' + test.maxFlow + '（期待値14） / 最小カット容量=' + test.minCutCapacity + '（期待値14）');
+
+    // ---- 需要上限のテスト：容量をどれだけ増やしても20を超えないこと ----
+    switchStructure('withC');
+    const hugeCaps = {S_M:99, M_WA:99, M_WB:99, WA_QA:99, WB_QB:99, QA_PA:99, QB_PB:99,
+                       PA_C:99, PB_C:99, PA_W:99, PB_W:99, W_T:99, C_T:99};
+    const hugeTest = computeMaxFlow(hugeCaps);
+    console.assert(hugeTest.maxFlow === DEMAND, '[TEST-DEMAND] 容量を極端に増やしても最大流が需要20で頭打ちになること: ' + hugeTest.maxFlow);
+    console.log('需要上限テスト：全辺容量99でも最大流=' + hugeTest.maxFlow + '（期待値20）');
+    switchStructure('normal');
+    capacities = Object.assign({}, PRESETS.base.caps);
   }
 
   init();
